@@ -1,0 +1,14 @@
+# Environments (כדי שהמפתחות הסודיים שלך לא ידלפו!)
+.env
+.venv
+env/
+venv/
+
+# Python (קבצי מערכת מיותרים שפייתון מייצר)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS generated files
+.DS_Store
+Thumbs.db
