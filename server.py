@@ -45,7 +45,7 @@ genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 model = genai.GenerativeModel('gemini-3-flash-preview') 
 
 # 3. הגדרת Deepgram
-DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_KEY")
 deepgram = AsyncDeepgramClient(api_key=DEEPGRAM_API_KEY)
 
 # 4. קובץ הארכיון שלנו לניתוח סשנים
