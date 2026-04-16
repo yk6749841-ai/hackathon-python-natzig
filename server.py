@@ -43,7 +43,7 @@ load_dotenv()
 
 # 2. הגדרת מודל Gemini
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-3-flash-preview')
 # model = genai.GenerativeModel('gemini-3-flash-preview') 
 
 # 3. הגדרת Deepgram
