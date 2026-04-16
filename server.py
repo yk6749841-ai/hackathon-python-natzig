@@ -215,12 +215,110 @@ async def root():
 # #------------------------------------------------------------------------------------
 
 
+# async def process_deepgram_stt(audio_bytes: bytes) -> dict:
+#     """מעקף ישיר ל-Deepgram - יציב וחסין תקלות"""
+#     print("-> Deepgram STT Processing (Direct API)...")
+#     try:
+#         # חזרנו ל-nova-2 שתומך בעברית, ללא תוספות מיותרות שיכשילו את הבקשה
+#         url = "https://api.deepgram.com/v1/listen?model=nova-2&language=he"
+#         headers = {
+#             "Authorization": f"Token {DEEPGRAM_API_KEY}",
+#             "Content-Type": "audio/webm"
+#         }
+        
+#         async with httpx.AsyncClient() as client:
+#             response = await client.post(url, headers=headers, content=audio_bytes, timeout=15.0)
+            
+#             # אם יש שגיאה 400, עכשיו נראה בדיוק מה הסיבה האמיתית!
+#             if response.status_code != 200:
+#                 print(f"!!! Deepgram Error Body: {response.text}") 
+#                 response.raise_for_status()
+                
+#             data = response.json()
+            
+#             # בדיקה בטוחה שהתקבל טקסט
+#             if "results" in data and data["results"]["channels"]:
+#                 result = data["results"]["channels"][0]["alternatives"][0]
+#                 transcript = result["transcript"]
+#                 words = result.get("words", [])
+                
+#                 print(f"-> Deepgram Result: {transcript}")
+#                 return {
+#                     "text": transcript,
+#                     "sentiment": "neutral",
+#                     "word_count": len(words),
+#                     "duration_sec": words[-1]["end"] if words else 0.1
+#                 }
+#             else:
+#                 return {"text": "לא זוהה דיבור.", "sentiment": "neutral", "word_count": 0, "duration_sec": 1}
+                
+#     except Exception as e:
+#         print(f"Error in Deepgram STT: {e}")
+#         return {"text": "סליחה, לא שמעתי ברור.", "sentiment": "neutral", "word_count": 0, "duration_sec": 1}
+
+# # שולפים את המפתח של ג'מיני באופן בטוח
+# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) -> dict:
+#     """מעקף ישיר ל-Gemini - עוקף את כל באגי ה-404 של הספרייה המיושנת"""
+#     print("-> Sending complex data to Gemini LLM (Direct API)...")
+    
+#     # פנייה ישירה לכתובת ה-API של 1.5-flash ללא תלות בשום ספרייה!
+#     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+#     headers = {
+#         "Content-Type": "application/json"
+#     }
+    
+#     prompt = f"""
+#     אתה סימולטור חכם לאימון נציגי שירות לקוחות.
+#     דברי הלקוח (המתאמן): "{user_text}"
+#     סנטימנט קולי שזוהה: {sentiment}
+#     קצב דיבור של הלקוח: {acoustics['wpm']} מילים בדקה.
+
+#     נתח את תגובת הלקוח, והחזר אובייקט JSON תקני בלבד (ללא Markdown) במבנה הבא:
+#     {{
+#         "response_to_user": "תגובת הלקוח הווירטואלי (קצרה, בעברית)",
+#         "analysis": {{
+#             "empathy_score": 8,
+#             "respect_score": 9,
+#             "feedback": "הערה קצרה למתאמן על טון הדיבור והאמפתיה שלו"
+#         }}
+#     }}
+#     """
+    
+#     # בניית המבנה שגוגל דורשת
+#     payload = {
+#         "contents": [{"parts": [{"text": prompt}]}]
+#     }
+    
+#     try:
+#         async with httpx.AsyncClient() as client:
+#             response = await client.post(url, headers=headers, json=payload, timeout=20.0)
+            
+#             if response.status_code != 200:
+#                 print(f"!!! Gemini Error Body: {response.text}")
+#                 response.raise_for_status()
+                
+#             data = response.json()
+#             text_response = data["candidates"][0]["content"]["parts"][0]["text"]
+            
+#             # ניקוי במקרה שג'מיני עוטף את ה-JSON בסימני Markdown
+#             text_response = text_response.replace("```json", "").replace("```", "").strip()
+            
+#             result_json = json.loads(text_response)
+#             print(f"-> AI Response text: {result_json.get('response_to_user')}")
+#             return result_json
+            
+#     except Exception as e:
+#         print(f"Error in LLM Advanced: {e}")
+#         return {"response_to_user": "הייתה שגיאת עיבוד בשרת.", "analysis": {}}
+
 async def process_deepgram_stt(audio_bytes: bytes) -> dict:
-    """מעקף ישיר ל-Deepgram - יציב וחסין תקלות"""
+    """מעקף ישיר ל-Deepgram - עובד עם המודל הכללי בדיוק כמו שהשרת שלהם דרש!"""
     print("-> Deepgram STT Processing (Direct API)...")
     try:
-        # חזרנו ל-nova-2 שתומך בעברית, ללא תוספות מיותרות שיכשילו את הבקשה
-        url = "https://api.deepgram.com/v1/listen?model=nova-2&language=he"
+        # דיפגרם ביקשו מודל general לעברית? זה בדיוק מה שהם יקבלו.
+        url = "https://api.deepgram.com/v1/listen?model=general&language=he"
         headers = {
             "Authorization": f"Token {DEEPGRAM_API_KEY}",
             "Content-Type": "audio/webm"
@@ -229,14 +327,12 @@ async def process_deepgram_stt(audio_bytes: bytes) -> dict:
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=headers, content=audio_bytes, timeout=15.0)
             
-            # אם יש שגיאה 400, עכשיו נראה בדיוק מה הסיבה האמיתית!
             if response.status_code != 200:
                 print(f"!!! Deepgram Error Body: {response.text}") 
                 response.raise_for_status()
                 
             data = response.json()
             
-            # בדיקה בטוחה שהתקבל טקסט
             if "results" in data and data["results"]["channels"]:
                 result = data["results"]["channels"][0]["alternatives"][0]
                 transcript = result["transcript"]
@@ -256,14 +352,27 @@ async def process_deepgram_stt(audio_bytes: bytes) -> dict:
         print(f"Error in Deepgram STT: {e}")
         return {"text": "סליחה, לא שמעתי ברור.", "sentiment": "neutral", "word_count": 0, "duration_sec": 1}
 
+async def analyze_acoustics(audio_bytes: bytes, stt_data: dict) -> dict:
+    """מבצע ניתוח אקוסטי מהיר. הפונקציה שהלכה לאיבוד הוחזרה!"""
+    print("-> Acoustic Analysis running...")
+    duration = stt_data["duration_sec"]
+    word_count = stt_data["word_count"]
+    
+    wpm = int((word_count / duration) * 60) if duration > 0 else 0
+    size_kb = round(len(audio_bytes) / 1024, 2)
+    
+    return {
+        "wpm": wpm,
+        "size_kb": size_kb
+    }
+
 # שולפים את המפתח של ג'מיני באופן בטוח
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) -> dict:
-    """מעקף ישיר ל-Gemini - עוקף את כל באגי ה-404 של הספרייה המיושנת"""
+    """מעקף ישיר ל-Gemini - עוקף את כל באגי ה-404"""
     print("-> Sending complex data to Gemini LLM (Direct API)...")
     
-    # פנייה ישירה לכתובת ה-API של 1.5-flash ללא תלות בשום ספרייה!
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {
         "Content-Type": "application/json"
@@ -286,7 +395,6 @@ async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) 
     }}
     """
     
-    # בניית המבנה שגוגל דורשת
     payload = {
         "contents": [{"parts": [{"text": prompt}]}]
     }
@@ -302,7 +410,6 @@ async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) 
             data = response.json()
             text_response = data["candidates"][0]["content"]["parts"][0]["text"]
             
-            # ניקוי במקרה שג'מיני עוטף את ה-JSON בסימני Markdown
             text_response = text_response.replace("```json", "").replace("```", "").strip()
             
             result_json = json.loads(text_response)
@@ -312,7 +419,6 @@ async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) 
     except Exception as e:
         print(f"Error in LLM Advanced: {e}")
         return {"response_to_user": "הייתה שגיאת עיבוד בשרת.", "analysis": {}}
-
 
 async def process_tts_hebrew(text: str) -> bytes:
     print("Generating Audio with Edge-TTS...") # לוג התחלה
