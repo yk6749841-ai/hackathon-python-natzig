@@ -126,12 +126,101 @@ async def root():
 #     except Exception as e:
 #         print(f"Error in Deepgram STT: {e}")
 #         return {"text": "סליחה, לא שמעתי ברור.", "sentiment": "unknown", "word_count": 0, "duration_sec": 1}
+# async def process_deepgram_stt(audio_bytes: bytes) -> dict:
+#     """שולח אודיו ל-Deepgram בצורה ישירה (ללא סנטימנט שלא נתמך בעברית)"""
+#     print("-> Deepgram STT Processing (Direct API)...")
+#     try:
+
+#         url = "https://api.deepgram.com/v1/listen?language=he&punctuate=true"
+#         headers = {
+#             "Authorization": f"Token {DEEPGRAM_API_KEY}",
+#             "Content-Type": "audio/webm"
+#         }
+        
+#         async with httpx.AsyncClient() as client:
+#             response = await client.post(url, headers=headers, content=audio_bytes, timeout=15.0)
+#             response.raise_for_status()
+#             data = response.json()
+            
+#             result = data["results"]["channels"][0]["alternatives"][0]
+#             transcript = result["transcript"]
+#             words = result.get("words", [])
+
+#             print(f"-> Deepgram Result: {transcript}")
+#             return {
+#                 "text": transcript,
+#                 "sentiment": "neutral", # מכניסים ערך קבוע כי דיפגרם לא תומך בעברית לזה
+#                 "word_count": len(words),
+#                 "duration_sec": words[-1]["end"] if words else 0.1
+#             }
+#     except Exception as e:
+#         print(f"Error in Deepgram STT: {e}")
+#         return {"text": "סליחה, לא שמעתי ברור.", "sentiment": "neutral", "word_count": 0, "duration_sec": 1}
+
+# async def analyze_acoustics(audio_bytes: bytes, stt_data: dict) -> dict:
+#     """מבצע ניתוח אקוסטי מהיר. במקום ספריות כבדות, נשתמש בנתוני ה-STT"""
+#     print("-> Acoustic Analysis running...")
+#     duration = stt_data["duration_sec"]
+#     word_count = stt_data["word_count"]
+    
+#     wpm = int((word_count / duration) * 60) if duration > 0 else 0
+#     size_kb = round(len(audio_bytes) / 1024, 2)
+    
+#     return {
+#         "wpm": wpm,
+#         "size_kb": size_kb
+#     }
+
+# async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) -> dict:
+#     """המוח: Gemini מקבל את הכל ומחזיר JSON עם התגובה והאנליזה"""
+#     print("-> Sending complex data to Gemini LLM...")
+#     try:
+#         # אנו מבקשים מ-Gemini להחזיר רק JSON טהור כדי שנוכל לחלץ ממנו נתונים
+#         prompt = f"""
+#         אתה סימולטור חכם לאימון נציגי שירות לקוחות.
+#         דברי הלקוח (המתאמן): "{user_text}"
+#         סנטימנט קולי שזוהה: {sentiment}
+#         קצב דיבור של הלקוח: {acoustics['wpm']} מילים בדקה.
+
+#         נתח את תגובת הלקוח, והחזר אובייקט JSON תקני בלבד (ללא Markdown) במבנה הבא:
+#         {{
+#             "response_to_user": "תגובת הלקוח הווירטואלי (קצרה, בעברית)",
+#             "analysis": {{
+#                 "empathy_score": <ציון מ-1 עד 10>,
+#                 "respect_score": <ציון מ-1 עד 10>,
+#                 "feedback": "הערה קצרה למתאמן על טון הדיבור והאמפתיה שלו"
+#             }}
+#         }}
+#         """
+#         response = await model.generate_content_async(prompt)
+#         text_response = response.text.replace("```json", "").replace("```", "").strip()
+#         data = json.loads(text_response)
+        
+#         print(f"-> AI Response text: {data.get('response_to_user')}")
+#         return data
+#     except Exception as e:
+#         print(f"Error in LLM Advanced: {e}")
+#         # מבנה גיבוי למקרה של שגיאה
+#         return {"response_to_user": "הייתה שגיאת עיבוד בשרת.", "analysis": {}}
+
+# async def save_to_archive(session_data: dict):
+#     """שומר את הניתוח לקובץ JSONL מקומי שבו כל שורה היא אובייקט חוקי"""
+#     session_data["timestamp"] = datetime.now().isoformat()
+#     try:
+#         async with aiofiles.open(ARCHIVE_FILE, mode='a', encoding='utf-8') as f:
+#             await f.write(json.dumps(session_data, ensure_ascii=False) + "\n")
+#         print("-> Analytics saved to Archive.")
+#     except Exception as e:
+#         print(f"Failed to save archive: {e}")
+# #------------------------------------------------------------------------------------
+
+
 async def process_deepgram_stt(audio_bytes: bytes) -> dict:
-    """שולח אודיו ל-Deepgram בצורה ישירה (ללא סנטימנט שלא נתמך בעברית)"""
+    """מעקף ישיר ל-Deepgram - יציב וחסין תקלות"""
     print("-> Deepgram STT Processing (Direct API)...")
     try:
-
-        url = "https://api.deepgram.com/v1/listen?language=he&punctuate=true"
+        # חזרנו ל-nova-2 שתומך בעברית, ללא תוספות מיותרות שיכשילו את הבקשה
+        url = "https://api.deepgram.com/v1/listen?model=nova-2&language=he"
         headers = {
             "Authorization": f"Token {DEEPGRAM_API_KEY}",
             "Content-Type": "audio/webm"
@@ -139,81 +228,90 @@ async def process_deepgram_stt(audio_bytes: bytes) -> dict:
         
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=headers, content=audio_bytes, timeout=15.0)
-            response.raise_for_status()
+            
+            # אם יש שגיאה 400, עכשיו נראה בדיוק מה הסיבה האמיתית!
+            if response.status_code != 200:
+                print(f"!!! Deepgram Error Body: {response.text}") 
+                response.raise_for_status()
+                
             data = response.json()
             
-            result = data["results"]["channels"][0]["alternatives"][0]
-            transcript = result["transcript"]
-            words = result.get("words", [])
-
-            print(f"-> Deepgram Result: {transcript}")
-            return {
-                "text": transcript,
-                "sentiment": "neutral", # מכניסים ערך קבוע כי דיפגרם לא תומך בעברית לזה
-                "word_count": len(words),
-                "duration_sec": words[-1]["end"] if words else 0.1
-            }
+            # בדיקה בטוחה שהתקבל טקסט
+            if "results" in data and data["results"]["channels"]:
+                result = data["results"]["channels"][0]["alternatives"][0]
+                transcript = result["transcript"]
+                words = result.get("words", [])
+                
+                print(f"-> Deepgram Result: {transcript}")
+                return {
+                    "text": transcript,
+                    "sentiment": "neutral",
+                    "word_count": len(words),
+                    "duration_sec": words[-1]["end"] if words else 0.1
+                }
+            else:
+                return {"text": "לא זוהה דיבור.", "sentiment": "neutral", "word_count": 0, "duration_sec": 1}
+                
     except Exception as e:
         print(f"Error in Deepgram STT: {e}")
         return {"text": "סליחה, לא שמעתי ברור.", "sentiment": "neutral", "word_count": 0, "duration_sec": 1}
 
-async def analyze_acoustics(audio_bytes: bytes, stt_data: dict) -> dict:
-    """מבצע ניתוח אקוסטי מהיר. במקום ספריות כבדות, נשתמש בנתוני ה-STT"""
-    print("-> Acoustic Analysis running...")
-    duration = stt_data["duration_sec"]
-    word_count = stt_data["word_count"]
-    
-    wpm = int((word_count / duration) * 60) if duration > 0 else 0
-    size_kb = round(len(audio_bytes) / 1024, 2)
-    
-    return {
-        "wpm": wpm,
-        "size_kb": size_kb
-    }
+# שולפים את המפתח של ג'מיני באופן בטוח
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) -> dict:
-    """המוח: Gemini מקבל את הכל ומחזיר JSON עם התגובה והאנליזה"""
-    print("-> Sending complex data to Gemini LLM...")
-    try:
-        # אנו מבקשים מ-Gemini להחזיר רק JSON טהור כדי שנוכל לחלץ ממנו נתונים
-        prompt = f"""
-        אתה סימולטור חכם לאימון נציגי שירות לקוחות.
-        דברי הלקוח (המתאמן): "{user_text}"
-        סנטימנט קולי שזוהה: {sentiment}
-        קצב דיבור של הלקוח: {acoustics['wpm']} מילים בדקה.
+    """מעקף ישיר ל-Gemini - עוקף את כל באגי ה-404 של הספרייה המיושנת"""
+    print("-> Sending complex data to Gemini LLM (Direct API)...")
+    
+    # פנייה ישירה לכתובת ה-API של 1.5-flash ללא תלות בשום ספרייה!
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
+    prompt = f"""
+    אתה סימולטור חכם לאימון נציגי שירות לקוחות.
+    דברי הלקוח (המתאמן): "{user_text}"
+    סנטימנט קולי שזוהה: {sentiment}
+    קצב דיבור של הלקוח: {acoustics['wpm']} מילים בדקה.
 
-        נתח את תגובת הלקוח, והחזר אובייקט JSON תקני בלבד (ללא Markdown) במבנה הבא:
-        {{
-            "response_to_user": "תגובת הלקוח הווירטואלי (קצרה, בעברית)",
-            "analysis": {{
-                "empathy_score": <ציון מ-1 עד 10>,
-                "respect_score": <ציון מ-1 עד 10>,
-                "feedback": "הערה קצרה למתאמן על טון הדיבור והאמפתיה שלו"
-            }}
+    נתח את תגובת הלקוח, והחזר אובייקט JSON תקני בלבד (ללא Markdown) במבנה הבא:
+    {{
+        "response_to_user": "תגובת הלקוח הווירטואלי (קצרה, בעברית)",
+        "analysis": {{
+            "empathy_score": 8,
+            "respect_score": 9,
+            "feedback": "הערה קצרה למתאמן על טון הדיבור והאמפתיה שלו"
         }}
-        """
-        response = await model.generate_content_async(prompt)
-        text_response = response.text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(text_response)
-        
-        print(f"-> AI Response text: {data.get('response_to_user')}")
-        return data
+    }}
+    """
+    
+    # בניית המבנה שגוגל דורשת
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=headers, json=payload, timeout=20.0)
+            
+            if response.status_code != 200:
+                print(f"!!! Gemini Error Body: {response.text}")
+                response.raise_for_status()
+                
+            data = response.json()
+            text_response = data["candidates"][0]["content"]["parts"][0]["text"]
+            
+            # ניקוי במקרה שג'מיני עוטף את ה-JSON בסימני Markdown
+            text_response = text_response.replace("```json", "").replace("```", "").strip()
+            
+            result_json = json.loads(text_response)
+            print(f"-> AI Response text: {result_json.get('response_to_user')}")
+            return result_json
+            
     except Exception as e:
         print(f"Error in LLM Advanced: {e}")
-        # מבנה גיבוי למקרה של שגיאה
         return {"response_to_user": "הייתה שגיאת עיבוד בשרת.", "analysis": {}}
-
-async def save_to_archive(session_data: dict):
-    """שומר את הניתוח לקובץ JSONL מקומי שבו כל שורה היא אובייקט חוקי"""
-    session_data["timestamp"] = datetime.now().isoformat()
-    try:
-        async with aiofiles.open(ARCHIVE_FILE, mode='a', encoding='utf-8') as f:
-            await f.write(json.dumps(session_data, ensure_ascii=False) + "\n")
-        print("-> Analytics saved to Archive.")
-    except Exception as e:
-        print(f"Failed to save archive: {e}")
-#------------------------------------------------------------------------------------
-
 
 
 async def process_tts_hebrew(text: str) -> bytes:
