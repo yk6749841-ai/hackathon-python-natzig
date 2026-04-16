@@ -43,7 +43,7 @@ load_dotenv()
 
 # 2. הגדרת מודל Gemini
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+model = genai.GenerativeModel('gemini-1.5-flash')
 # model = genai.GenerativeModel('gemini-3-flash-preview') 
 
 # 3. הגדרת Deepgram
@@ -130,8 +130,8 @@ async def process_deepgram_stt(audio_bytes: bytes) -> dict:
     """שולח אודיו ל-Deepgram בצורה ישירה (ללא סנטימנט שלא נתמך בעברית)"""
     print("-> Deepgram STT Processing (Direct API)...")
     try:
-        # הקישור המעודכן - עובד מושלם לעברית
-        url = "https://api.deepgram.com/v1/listen?model=nova-2&language=he&smart_format=true"
+
+        url = "https://api.deepgram.com/v1/listen?language=he&punctuate=true"
         headers = {
             "Authorization": f"Token {DEEPGRAM_API_KEY}",
             "Content-Type": "audio/webm"
