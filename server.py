@@ -43,7 +43,7 @@ load_dotenv()
 
 # 2. הגדרת מודל Gemini
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-1.5-flash-latest')
 # model = genai.GenerativeModel('gemini-3-flash-preview') 
 
 # 3. הגדרת Deepgram
@@ -126,44 +126,36 @@ async def root():
 #     except Exception as e:
 #         print(f"Error in Deepgram STT: {e}")
 #         return {"text": "סליחה, לא שמעתי ברור.", "sentiment": "unknown", "word_count": 0, "duration_sec": 1}
-
 async def process_deepgram_stt(audio_bytes: bytes) -> dict:
-    """שולח אודיו ל-Deepgram בצורה ישירה ומוגנת מתקלות גרסה"""
+    """שולח אודיו ל-Deepgram בצורה ישירה (ללא סנטימנט שלא נתמך בעברית)"""
     print("-> Deepgram STT Processing (Direct API)...")
     try:
-        url = "https://api.deepgram.com/v1/listen?model=nova-2&language=he&smart_format=true&analyze_sentiment=true"
+        # הקישור המעודכן - עובד מושלם לעברית
+        url = "https://api.deepgram.com/v1/listen?model=nova-2&language=he&smart_format=true"
         headers = {
             "Authorization": f"Token {DEEPGRAM_API_KEY}",
             "Content-Type": "audio/webm"
         }
         
-        # שימוש ב-httpx לתקשורת ישירה ויציבה מול השרת שלהם
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=headers, content=audio_bytes, timeout=15.0)
             response.raise_for_status()
             data = response.json()
             
-            # חילוץ הנתונים מה-JSON שחזר
             result = data["results"]["channels"][0]["alternatives"][0]
             transcript = result["transcript"]
             words = result.get("words", [])
-            
-            # חילוץ סנטימנט אם קיים
-            sentiment = "neutral"
-            if "sentiments" in data["results"] and data["results"]["sentiments"].get("segments"):
-                sentiment = data["results"]["sentiments"]["segments"][0]["sentiment"]
 
-            print(f"-> Deepgram Result: {transcript} | Sentiment: {sentiment}")
+            print(f"-> Deepgram Result: {transcript}")
             return {
                 "text": transcript,
-                "sentiment": sentiment,
+                "sentiment": "neutral", # מכניסים ערך קבוע כי דיפגרם לא תומך בעברית לזה
                 "word_count": len(words),
                 "duration_sec": words[-1]["end"] if words else 0.1
             }
     except Exception as e:
         print(f"Error in Deepgram STT: {e}")
-        return {"text": "סליחה, לא שמעתי ברור.", "sentiment": "unknown", "word_count": 0, "duration_sec": 1}
-
+        return {"text": "סליחה, לא שמעתי ברור.", "sentiment": "neutral", "word_count": 0, "duration_sec": 1}
 
 async def analyze_acoustics(audio_bytes: bytes, stt_data: dict) -> dict:
     """מבצע ניתוח אקוסטי מהיר. במקום ספריות כבדות, נשתמש בנתוני ה-STT"""
