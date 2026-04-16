@@ -21,6 +21,10 @@ model = genai.GenerativeModel('gemini-3-flash-preview')
 
 app = FastAPI()
 
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "Voice AI Server is running!"}
+
 async def process_stt_hebrew(audio_bytes: bytes) -> str:
     print("STT Processing with Gemini...") # לוג התחלה
     try:
