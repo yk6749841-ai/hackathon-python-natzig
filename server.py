@@ -35,7 +35,7 @@ import aiofiles
 from dotenv import load_dotenv
 import edge_tts
 import google.generativeai as genai
-from deepgram import DeepgramClient, PrerecordedOptions
+from deepgram import AsyncDeepgramClient
 
 # 1. טעינת המשתנים מקובץ ה-.env לתוך סביבת הריצה - חובה לפני שקוראים למפתחות!
 load_dotenv()
@@ -46,7 +46,7 @@ model = genai.GenerativeModel('gemini-3-flash-preview')
 
 # 3. הגדרת Deepgram
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
-deepgram = DeepgramClient(DEEPGRAM_API_KEY)
+deepgram = AsyncDeepgramClient(api_key=DEEPGRAM_API_KEY)
 
 # 4. קובץ הארכיון שלנו לניתוח סשנים
 ARCHIVE_FILE = "sessions_archive.jsonl"
@@ -92,40 +92,34 @@ async def root():
 
 #----------------------------------------------------------------
 async def process_deepgram_stt(audio_bytes: bytes) -> dict:
-    """שולח אודיו ל-Deepgram ומקבל תמלול, סנטימנט וזמנים"""
+    """שולח אודיו ל-Deepgram (מעודכן לגרסה החדשה!)"""
     print("-> Deepgram STT & Sentiment Processing...")
     try:
-        # אנו עוטפים את הקריאה הסינכרונית של Deepgram בפונקציה אסינכרונית
-        payload = {"buffer": audio_bytes}
-        options = PrerecordedOptions(
+        # בגרסה החדשה פשוט מעבירים את ההגדרות ישירות
+        response = await deepgram.listen.v1.media.transcribe_file(
+            request=audio_bytes,
             model="nova-2",
             language="he",
             smart_format=True,
-            analyze_sentiment=True # הפעלת ניתוח סנטימנט מובנה
-        )
-        # הרצה ב-thread נפרד כדי לא לתקוע את הלופ
-        response = await asyncio.to_thread(
-            deepgram.listen.rest.v("1").analyze_payload, payload, options
+            analyze_sentiment=True
         )
         
-        # חילוץ הנתונים
-        result = response["results"]["channels"][0]["alternatives"][0]
-        transcript = result["transcript"]
-        words = result.get("words", [])
+        # חילוץ הנתונים (התשובה חוזרת כאובייקטים, לא כמילון)
+        result = response.results.channels[0].alternatives[0]
+        transcript = result.transcript
+        words = result.words
         
-        # חילוץ סנטימנט ממוצע אם קיים
+        # חילוץ סנטימנט אם קיים
         sentiment = "neutral"
-        if response["results"].get("sentiments"):
-            sentiments = response["results"]["sentiments"]["segments"]
-            if sentiments:
-                sentiment = sentiments[0]["sentiment"] # negative, neutral, positive
+        if response.results.sentiments and response.results.sentiments.segments:
+            sentiment = response.results.sentiments.segments[0].sentiment
 
         print(f"-> Deepgram Result: {transcript} | Sentiment: {sentiment}")
         return {
             "text": transcript,
             "sentiment": sentiment,
-            "word_count": len(words),
-            "duration_sec": words[-1]["end"] if words else 0.1
+            "word_count": len(words) if words else 0,
+            "duration_sec": words[-1].end if words else 0.1
         }
     except Exception as e:
         print(f"Error in Deepgram STT: {e}")
