@@ -1,58 +1,194 @@
 
+# from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+# import uvicorn
+# import asyncio
+# import io
+# import os
+# from dotenv import load_dotenv
+# import edge_tts
+
+# # 1. מייבאים את הספרייה של ג'מיני במקום זו של OpenAI
+# import google.generativeai as genai
+
+# # טעינת המשתנים מקובץ ה-.env לתוך סביבת הריצה
+# load_dotenv()
+
+# # 2. מגדירים את מפתח ה-API של גוגל
+# genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+# # 3. כאן בדיוק מגדירים את המודל!
+# model = genai.GenerativeModel('gemini-3-flash-preview')
+
+# app = FastAPI()
+
+
+#-----------------------------------------------------------הוספה
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import uvicorn
 import asyncio
 import io
 import os
+import json
+import time
+from datetime import datetime
+import aiofiles
 from dotenv import load_dotenv
 import edge_tts
-
-# 1. מייבאים את הספרייה של ג'מיני במקום זו של OpenAI
 import google.generativeai as genai
+from deepgram import DeepgramClient, PrerecordedOptions
 
-# טעינת המשתנים מקובץ ה-.env לתוך סביבת הריצה
+# 1. טעינת המשתנים מקובץ ה-.env לתוך סביבת הריצה - חובה לפני שקוראים למפתחות!
 load_dotenv()
 
-# 2. מגדירים את מפתח ה-API של גוגל
+# 2. הגדרת מודל Gemini
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = genai.GenerativeModel('gemini-3-flash-preview') 
 
-# 3. כאן בדיוק מגדירים את המודל!
-model = genai.GenerativeModel('gemini-3-flash-preview')
+# 3. הגדרת Deepgram
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
+deepgram = DeepgramClient(DEEPGRAM_API_KEY)
 
+# 4. קובץ הארכיון שלנו לניתוח סשנים
+ARCHIVE_FILE = "sessions_archive.jsonl"
+
+# 5. אתחול השרת
 app = FastAPI()
+#------------------------------------------------------------סיום
+
 
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "Voice AI Server is running!"}
 
-async def process_stt_hebrew(audio_bytes: bytes) -> str:
-    print("STT Processing with Gemini...") # לוג התחלה
-    try:
-        # שולחים את האודיו ל-Gemini יחד עם הנחיה לתמלל
-        response = await model.generate_content_async([
-            {"mime_type": "audio/webm", "data": audio_bytes},
-            "תמלל את ההקלטה הבאה לעברית במדויק. החזר רק את הטקסט המתומלל ללא שום תוספות."
-        ])
-        print(f"STT Result: {response.text}") # לוג תוצאה
-        return response.text
-    except Exception as e:
-        print(f"Error during STT: {e}")
-        return "סליחה, לא הצלחתי להבין את ההקלטה."
+# async def process_stt_hebrew(audio_bytes: bytes) -> str:
+#     print("STT Processing with Gemini...") # לוג התחלה
+#     try:
+#         # שולחים את האודיו ל-Gemini יחד עם הנחיה לתמלל
+#         response = await model.generate_content_async([
+#             {"mime_type": "audio/webm", "data": audio_bytes},
+#             "תמלל את ההקלטה הבאה לעברית במדויק. החזר רק את הטקסט המתומלל ללא שום תוספות."
+#         ])
+#         print(f"STT Result: {response.text}") # לוג תוצאה
+#         return response.text
+#     except Exception as e:
+#         print(f"Error during STT: {e}")
+#         return "סליחה, לא הצלחתי להבין את ההקלטה."
 
-async def process_llm(text: str) -> str:
-    print("Sending to LLM...") # לוג התחלה
+# async def process_llm(text: str) -> str:
+#     print("Sending to LLM...") # לוג התחלה
+#     try:
+#         # אנו מצרפים את הוראות המערכת לבקשה של המשתמש
+#         prompt = f"הוראות מערכת: אתה נציג שירות לקוחות קולי. ענה בקצרה, לעניין ובעברית בלבד.\n\nדברי הלקוח: {text}"
+        
+#         response = await model.generate_content_async(prompt)
+#         answer = response.text
+        
+#         print(f"AI Response: {answer}") # לוג תוצאה
+#         return answer
+#     except Exception as e:
+#         print(f"Error in LLM: {e}")
+#         return "הייתה שגיאה בעיבוד התשובה."
+
+
+#----------------------------------------------------------------
+async def process_deepgram_stt(audio_bytes: bytes) -> dict:
+    """שולח אודיו ל-Deepgram ומקבל תמלול, סנטימנט וזמנים"""
+    print("-> Deepgram STT & Sentiment Processing...")
     try:
-        # אנו מצרפים את הוראות המערכת לבקשה של המשתמש
-        prompt = f"הוראות מערכת: אתה נציג שירות לקוחות קולי. ענה בקצרה, לעניין ובעברית בלבד.\n\nדברי הלקוח: {text}"
+        # אנו עוטפים את הקריאה הסינכרונית של Deepgram בפונקציה אסינכרונית
+        payload = {"buffer": audio_bytes}
+        options = PrerecordedOptions(
+            model="nova-2",
+            language="he",
+            smart_format=True,
+            analyze_sentiment=True # הפעלת ניתוח סנטימנט מובנה
+        )
+        # הרצה ב-thread נפרד כדי לא לתקוע את הלופ
+        response = await asyncio.to_thread(
+            deepgram.listen.rest.v("1").analyze_payload, payload, options
+        )
         
-        response = await model.generate_content_async(prompt)
-        answer = response.text
+        # חילוץ הנתונים
+        result = response["results"]["channels"][0]["alternatives"][0]
+        transcript = result["transcript"]
+        words = result.get("words", [])
         
-        print(f"AI Response: {answer}") # לוג תוצאה
-        return answer
+        # חילוץ סנטימנט ממוצע אם קיים
+        sentiment = "neutral"
+        if response["results"].get("sentiments"):
+            sentiments = response["results"]["sentiments"]["segments"]
+            if sentiments:
+                sentiment = sentiments[0]["sentiment"] # negative, neutral, positive
+
+        print(f"-> Deepgram Result: {transcript} | Sentiment: {sentiment}")
+        return {
+            "text": transcript,
+            "sentiment": sentiment,
+            "word_count": len(words),
+            "duration_sec": words[-1]["end"] if words else 0.1
+        }
     except Exception as e:
-        print(f"Error in LLM: {e}")
-        return "הייתה שגיאה בעיבוד התשובה."
+        print(f"Error in Deepgram STT: {e}")
+        return {"text": "סליחה, לא שמעתי ברור.", "sentiment": "unknown", "word_count": 0, "duration_sec": 1}
+
+async def analyze_acoustics(audio_bytes: bytes, stt_data: dict) -> dict:
+    """מבצע ניתוח אקוסטי מהיר. במקום ספריות כבדות, נשתמש בנתוני ה-STT"""
+    print("-> Acoustic Analysis running...")
+    duration = stt_data["duration_sec"]
+    word_count = stt_data["word_count"]
+    
+    wpm = int((word_count / duration) * 60) if duration > 0 else 0
+    size_kb = round(len(audio_bytes) / 1024, 2)
+    
+    return {
+        "wpm": wpm,
+        "size_kb": size_kb
+    }
+
+async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) -> dict:
+    """המוח: Gemini מקבל את הכל ומחזיר JSON עם התגובה והאנליזה"""
+    print("-> Sending complex data to Gemini LLM...")
+    try:
+        # אנו מבקשים מ-Gemini להחזיר רק JSON טהור כדי שנוכל לחלץ ממנו נתונים
+        prompt = f"""
+        אתה סימולטור חכם לאימון נציגי שירות לקוחות.
+        דברי הלקוח (המתאמן): "{user_text}"
+        סנטימנט קולי שזוהה: {sentiment}
+        קצב דיבור של הלקוח: {acoustics['wpm']} מילים בדקה.
+
+        נתח את תגובת הלקוח, והחזר אובייקט JSON תקני בלבד (ללא Markdown) במבנה הבא:
+        {{
+            "response_to_user": "תגובת הלקוח הווירטואלי (קצרה, בעברית)",
+            "analysis": {{
+                "empathy_score": <ציון מ-1 עד 10>,
+                "respect_score": <ציון מ-1 עד 10>,
+                "feedback": "הערה קצרה למתאמן על טון הדיבור והאמפתיה שלו"
+            }}
+        }}
+        """
+        response = await model.generate_content_async(prompt)
+        text_response = response.text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(text_response)
+        
+        print(f"-> AI Response text: {data.get('response_to_user')}")
+        return data
+    except Exception as e:
+        print(f"Error in LLM Advanced: {e}")
+        # מבנה גיבוי למקרה של שגיאה
+        return {"response_to_user": "הייתה שגיאת עיבוד בשרת.", "analysis": {}}
+
+async def save_to_archive(session_data: dict):
+    """שומר את הניתוח לקובץ JSONL מקומי שבו כל שורה היא אובייקט חוקי"""
+    session_data["timestamp"] = datetime.now().isoformat()
+    try:
+        async with aiofiles.open(ARCHIVE_FILE, mode='a', encoding='utf-8') as f:
+            await f.write(json.dumps(session_data, ensure_ascii=False) + "\n")
+        print("-> Analytics saved to Archive.")
+    except Exception as e:
+        print(f"Failed to save archive: {e}")
+#------------------------------------------------------------------------------------
+
+
 
 async def process_tts_hebrew(text: str) -> bytes:
     print("Generating Audio with Edge-TTS...") # לוג התחלה
@@ -83,14 +219,50 @@ async def websocket_endpoint(websocket: WebSocket):
             print(f"---> DEBUG: Raw data received! Size: {len(audio_bytes)} bytes", flush=True)
             #---------------------------------
             
-            # 2. המרה לטקסט (STT)
-            user_text = await process_stt_hebrew(audio_bytes)
+            # # 2. המרה לטקסט (STT)
+            # user_text = await process_stt_hebrew(audio_bytes)
             
-            # 3. עיבוד שפה טבעית ויצירת תגובה (LLM)
-            ai_response_text = await process_llm(user_text)
+            # # 3. עיבוד שפה טבעית ויצירת תגובה (LLM)
+            # ai_response_text = await process_llm(user_text)
 
-            # 4. המרה חזרה לקול (TTS)
-            ai_audio_bytes = await process_tts_hebrew(ai_response_text)           
+            # # 4. המרה חזרה לקול (TTS)
+            # ai_audio_bytes = await process_tts_hebrew(ai_response_text)  
+                     
+            #------------------------------------------------------------------
+            # --- צינור העיבוד החדש (The Pipeline) ---
+            
+            # 2. STT (Deepgram) מול קריאה מקבילית
+            stt_data = await process_deepgram_stt(audio_bytes)
+            user_text = stt_data["text"]
+
+            # אם הלקוח שתק, אין טעם להמשיך
+            if not user_text or len(user_text.strip()) < 2:
+                continue
+
+            # 3. ניתוח אקוסטי במקביל (משתמש במידע מה-STT)
+            acoustics = await analyze_acoustics(audio_bytes, stt_data)
+
+            # 4. הפעלת מנוע ה-LLM לקבלת JSON מורכב
+            llm_result = await process_llm_advanced(user_text, stt_data["sentiment"], acoustics)
+            ai_text = llm_result.get("response_to_user", "")
+
+            # 5. המרת התשובה לקול במקביל לשמירת הנתונים לארכיון
+            archive_data = {
+                "user_text": user_text,
+                "deepgram_metadata": stt_data,
+                "acoustics": acoustics,
+                "ai_analysis": llm_result.get("analysis", {})
+            }
+            
+            ai_audio_bytes, _ = await asyncio.gather(
+                process_tts_hebrew(ai_text),
+                save_to_archive(archive_data)
+            )
+
+            # 6. שליחת האודיו המוכן חזרה ללקוח
+            if ai_audio_bytes:
+                await websocket.send_bytes(ai_audio_bytes)
+            #--------------------------------------------------------------------------
 
             # 5. שליחת האודיו המוכן חזרה ללקוח
             await websocket.send_bytes(ai_audio_bytes)
