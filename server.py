@@ -31,7 +31,7 @@ async def process_deepgram_stt(audio_bytes: bytes) -> dict:
     """מעקף ישיר ל-Deepgram - עובד עם המודל הכללי בדיוק כמו שהשרת שלהם דרש!"""
     print("-> Deepgram STT Processing (Direct API)...")
     try:
-        url = "https://api.deepgram.com/v1/listen?model=general&language=he"
+        url = "https://api.deepgram.com/v1/listen?model=nova-3&language=he"
         headers = {
             "Authorization": f"Token {DEEPGRAM_API_KEY}",
             "Content-Type": "audio/webm"
@@ -86,7 +86,7 @@ async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) 
     """מעקף ישיר ל-Gemini - עוקף את כל באגי ה-404"""
     print("-> Sending complex data to Gemini LLM (Direct API)...")
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {
         "Content-Type": "application/json"
     }
