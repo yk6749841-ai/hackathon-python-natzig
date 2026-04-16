@@ -13,7 +13,7 @@ import edge_tts
 load_dotenv()
 
 # 2. שליפת מפתחות ה-API באופן מרוכז וחד-פעמי (ללא קריאה לספריות ה-SDK)
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+AI21_API_KEY = os.getenv("AI21_API_KEY")
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_KEY")
 
 # 3. קובץ הארכיון שלנו לניתוח סשנים (זה היה בקוד המקורי שלך וממשיך כאן)
@@ -79,15 +79,17 @@ async def analyze_acoustics(audio_bytes: bytes, stt_data: dict) -> dict:
         "size_kb": size_kb
     }
 
-# שולפים את המפתח של ג'מיני באופן בטוח
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) -> dict:
-    """מעקף ישיר ל-Gemini - עוקף את כל באגי ה-404"""
-    print("-> Sending complex data to Gemini LLM (Direct API)...")
+    """התממשקות ישירה למודל Jamba של AI21"""
+    print("-> Sending complex data to AI21 LLM (Direct API)...")
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # הכתובת של AI21 למודלי שיחה
+    url = "https://api.ai21.com/studio/v1/chat/completions"
+    
+    # AI21 דורשים את המפתח בתוך ה-Headers בצורה הזו:
     headers = {
+        "Authorization": f"Bearer {AI21_API_KEY}",
         "Content-Type": "application/json"
     }
     
@@ -108,8 +110,13 @@ async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) 
     }}
     """
     
+    # המבנה של AI21 תואם לסטנדרט התעשייה (Messages)
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}]
+        "model": "jamba-1.5-mini", # המודל המהיר והחדש שלהם
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.3 # מומלץ להוריד מעט טמפרטורה כדי לקבל JSON יציב ואמין
     }
     
     try:
@@ -117,12 +124,15 @@ async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) 
             response = await client.post(url, headers=headers, json=payload, timeout=20.0)
             
             if response.status_code != 200:
-                print(f"!!! Gemini Error Body: {response.text}")
+                print(f"!!! AI21 Error Body: {response.text}")
                 response.raise_for_status()
                 
             data = response.json()
-            text_response = data["candidates"][0]["content"]["parts"][0]["text"]
             
+            # הנתיב לחילוץ הטקסט שונה מזה של ג'מיני
+            text_response = data["choices"][0]["message"]["content"]
+            
+            # ניקוי פורמט Markdown
             text_response = text_response.replace("```json", "").replace("```", "").strip()
             
             # הגנה מפני קריסות של JSON שבור
@@ -130,7 +140,6 @@ async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) 
                 result_json = json.loads(text_response)
             except json.JSONDecodeError:
                 print(f"!!! Failed to parse LLM JSON. Raw output: {text_response}")
-                # יצירת JSON גיבוי כדי שהשיחה לא תתרסק
                 result_json = {
                     "response_to_user": "סליחה, לא הבנתי את כוונתך. אפשר לחזור שוב?",
                     "analysis": {"empathy_score": 0, "respect_score": 0, "feedback": "שגיאת שרת בפענוח נתוני המודל."}
@@ -141,8 +150,7 @@ async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) 
             
     except Exception as e:
         print(f"Error in LLM Advanced: {e}")
-        return {"response_to_user": "הייתה שגיאת עיבוד בשרת.", "analysis": {}}
-
+        return {"response_to_user": "הייתה שגיאת עיבוד בשרת מול AI21.", "analysis": {}}
 async def process_tts_hebrew(text: str) -> bytes:
     print("Generating Audio with Edge-TTS...") # לוג התחלה
     try:
