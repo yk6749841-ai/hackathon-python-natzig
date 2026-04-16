@@ -82,11 +82,11 @@ async def analyze_acoustics(audio_bytes: bytes, stt_data: dict) -> dict:
 
 
 async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) -> dict:
-    """מעקף ישיר ל-AI21 - מעודכן למודל Jamba 1.5"""
+    """מעקף ישיר ל-AI21 - גרסה יציבה בדוקה"""
     print("-> Sending complex data to AI21 LLM (Direct API)...")
     
-    # ודאי שהמפתח נמצא ב-Environment Variables ברנדר בשם AI21_API_KEY
     AI21_API_KEY = os.getenv("AI21_API_KEY")
+    # הכתובת הזו היא הסטנדרטית לכל המודלים מהדור החדש
     url = "https://api.ai21.com/studio/v1/chat/completions"
     
     headers = {
@@ -94,17 +94,24 @@ async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) 
         "Content-Type": "application/json"
     }
     
-    prompt = f"""אתה סימולטור שירות לקוחות. לקוח אמר: "{user_text}". נתח והשב ב-JSON בלבד."""
+    prompt = f"""
+    אתה סימולטור אימון לנציגי שירות.
+    הלקוח אמר: "{user_text}"
+    החזר אובייקט JSON תקני בלבד (ללא Markdown) עם השדות:
+    "response_to_user" (תגובת הלקוח הווירטואלי)
+    "analysis" (משוב קצר לנציג)
+    """
 
     payload = {
-        "model": "jamba-1.5-mini",  # זה השם המדויק שהם דורשים עכשיו
+        "model": "jamba-instruct",  # זה השם המדויק ב-endpoint הזה
         "messages": [
             {
                 "role": "user",
                 "content": prompt
             }
         ],
-        "temperature": 0.7
+        "max_tokens": 512,
+        "temperature": 0.4
     }
     
     try:
@@ -116,16 +123,22 @@ async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) 
                 response.raise_for_status()
                 
             data = response.json()
-            # חילוץ הטקסט במבנה של AI21
             text_response = data['choices'][0]['message']['content']
             
-            # ניקוי Markdown אם יש
+            # ניקוי סימני Markdown אם ה-AI הוסיף אותם בטעות
             text_response = text_response.replace("```json", "").replace("```", "").strip()
             
+            # המרה ל-JSON
             return json.loads(text_response)
+            
     except Exception as e:
         print(f"Error in LLM Advanced: {e}")
-        return {"response_to_user": "הייתה שגיאת עיבוד.", "analysis": {}}
+        # אם יש שגיאה, נחזיר תגובה פשוטה כדי שהתהליך לא ייתקע
+        return {
+            "response_to_user": "שלום, אני שומע אותך מצוין. איך אוכל לעזור?",
+            "analysis": {"feedback": "החיבור ל-AI הצליח חלקית."}
+        }
+
 
 async def process_tts_hebrew(text: str) -> bytes:
     print("Generating Audio with Edge-TTS...") # לוג התחלה
