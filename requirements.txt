@@ -4,3 +4,5 @@ websockets
 python-dotenv
 google-generativeai
 edge-tts
+deepgram-sdk
+aiofiles
