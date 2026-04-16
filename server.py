@@ -113,12 +113,16 @@ async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) 
     # המבנה של AI21 תואם לסטנדרט התעשייה (Messages)
   # המבנה של AI21 תואם לסטנדרט התעשייה (Messages)
     payload = {
-        "model": "jamba-1.5-mini", # <--- זה השם המדויק שנתמך ב-v1/chat/completions
+        "model": "jamba-1.5-mini",  # וודאי שהשם כתוב בדיוק כך
         "messages": [
-            {"role": "user", "content": prompt}
+            {
+                "role": "user",
+                "content": prompt
+            }
         ],
+        "max_tokens": 512,
         "temperature": 0.3,
-        "max_tokens": 512 # הוספתי הגבלה כדי למנוע תשובות ארוכות מדי שיעכבו את הקול
+        "top_p": 1.0
     }
     
     try:
