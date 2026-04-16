@@ -65,6 +65,7 @@ async def process_deepgram_stt(audio_bytes: bytes) -> dict:
         print(f"Error in Deepgram STT: {e}")
         return {"text": "סליחה, לא שמעתי ברור.", "sentiment": "neutral", "word_count": 0, "duration_sec": 1}
 
+
 async def analyze_acoustics(audio_bytes: bytes, stt_data: dict) -> dict:
     """מבצע ניתוח אקוסטי מהיר. הפונקציה שהלכה לאיבוד הוחזרה!"""
     print("-> Acoustic Analysis running...")
@@ -81,48 +82,29 @@ async def analyze_acoustics(audio_bytes: bytes, stt_data: dict) -> dict:
 
 
 async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) -> dict:
-    """התממשקות ישירה למודל Jamba של AI21"""
+    """מעקף ישיר ל-AI21 - מעודכן למודל Jamba 1.5"""
     print("-> Sending complex data to AI21 LLM (Direct API)...")
     
-    # הכתובת של AI21 למודלי שיחה
+    # ודאי שהמפתח נמצא ב-Environment Variables ברנדר בשם AI21_API_KEY
+    AI21_API_KEY = os.getenv("AI21_API_KEY")
     url = "https://api.ai21.com/studio/v1/chat/completions"
     
-    # AI21 דורשים את המפתח בתוך ה-Headers בצורה הזו:
     headers = {
         "Authorization": f"Bearer {AI21_API_KEY}",
         "Content-Type": "application/json"
     }
     
-    prompt = f"""
-    אתה סימולטור חכם לאימון נציגי שירות לקוחות.
-    דברי הלקוח (המתאמן): "{user_text}"
-    סנטימנט קולי שזוהה: {sentiment}
-    קצב דיבור של הלקוח: {acoustics['wpm']} מילים בדקה.
+    prompt = f"""אתה סימולטור שירות לקוחות. לקוח אמר: "{user_text}". נתח והשב ב-JSON בלבד."""
 
-    נתח את תגובת הלקוח, והחזר אובייקט JSON תקני בלבד (ללא Markdown) במבנה הבא:
-    {{
-        "response_to_user": "תגובת הלקוח הווירטואלי (קצרה, בעברית)",
-        "analysis": {{
-            "empathy_score": 8,
-            "respect_score": 9,
-            "feedback": "הערה קצרה למתאמן על טון הדיבור והאמפתיה שלו"
-        }}
-    }}
-    """
-    
-    # המבנה של AI21 תואם לסטנדרט התעשייה (Messages)
-  # המבנה של AI21 תואם לסטנדרט התעשייה (Messages)
     payload = {
-        "model": "jamba-1.5-mini",  # וודאי שהשם כתוב בדיוק כך
+        "model": "jamba-1.5-mini",  # זה השם המדויק שהם דורשים עכשיו
         "messages": [
             {
                 "role": "user",
                 "content": prompt
             }
         ],
-        "max_tokens": 512,
-        "temperature": 0.3,
-        "top_p": 1.0
+        "temperature": 0.7
     }
     
     try:
@@ -134,29 +116,17 @@ async def process_llm_advanced(user_text: str, sentiment: str, acoustics: dict) 
                 response.raise_for_status()
                 
             data = response.json()
+            # חילוץ הטקסט במבנה של AI21
+            text_response = data['choices'][0]['message']['content']
             
-            # הנתיב לחילוץ הטקסט שונה מזה של ג'מיני
-            text_response = data["choices"][0]["message"]["content"]
-            
-            # ניקוי פורמט Markdown
+            # ניקוי Markdown אם יש
             text_response = text_response.replace("```json", "").replace("```", "").strip()
             
-            # הגנה מפני קריסות של JSON שבור
-            try:
-                result_json = json.loads(text_response)
-            except json.JSONDecodeError:
-                print(f"!!! Failed to parse LLM JSON. Raw output: {text_response}")
-                result_json = {
-                    "response_to_user": "סליחה, לא הבנתי את כוונתך. אפשר לחזור שוב?",
-                    "analysis": {"empathy_score": 0, "respect_score": 0, "feedback": "שגיאת שרת בפענוח נתוני המודל."}
-                }
-                
-            print(f"-> AI Response text: {result_json.get('response_to_user')}")
-            return result_json
-            
+            return json.loads(text_response)
     except Exception as e:
         print(f"Error in LLM Advanced: {e}")
-        return {"response_to_user": "הייתה שגיאת עיבוד בשרת מול AI21.", "analysis": {}}
+        return {"response_to_user": "הייתה שגיאת עיבוד.", "analysis": {}}
+
 async def process_tts_hebrew(text: str) -> bytes:
     print("Generating Audio with Edge-TTS...") # לוג התחלה
     try:
@@ -173,7 +143,8 @@ async def process_tts_hebrew(text: str) -> bytes:
     except Exception as e:
         print(f"Error in TTS: {e}")
         return b""
-    
+
+
 async def save_to_archive(data: dict):
     """שומרת נתונים לקובץ ה-JSONL באופן אסינכרוני שלא תוקע את השרת"""
     try:
