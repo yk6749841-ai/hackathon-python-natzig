@@ -228,98 +228,255 @@
 
 
 
-import React, { useState, useEffect } from 'react';
-import { Box, Typography, Grid, Paper, TextField, IconButton, Fab, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import DeleteIcon from '@mui/icons-material/Delete';
-import axios from 'axios';
+import os
+import json
+import itertools
+import asyncio
+import httpx
+import aiofiles
+import edge_tts
+import requests
+from google import genai
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from dotenv import load_dotenv
+from typing import List, Optional
+from datetime import datetime
 
-const NOTE_COLOR = '#fff9c4'; 
-const ACCENT_PINK = '#e91e63';
+#הוספה
+from google.genai import types
+#סיום
 
-const AgentNotes = () => {
-  const [notes, setNotes] = useState<any[]>([]);
-  const [open, setOpen] = useState(false);
-  const [newNoteContent, setNewNoteContent] = useState('');
-  const [user, setUser] = useState<any>(null);
+load_dotenv()
 
-  // שימוש בפורט 8080 כפי שמופיע ב-application.properties
-  const API_BASE = "http://localhost:8080/api/agent";
+# --- 1. הגדרות תשתית ונטפרי ---
+JAVA_SERVER_URL = os.getenv("JAVA_SERVER_URL", "").rstrip('/')
+cert_path = r'C:\ProgramData\NetFree\CA\netfree-ca-bundle-curl.crt'
+if os.path.exists(cert_path):
+    os.environ['SSL_CERT_FILE'] = cert_path
+    os.environ['REQUESTS_CA_BUNDLE'] = cert_path
+    print("✅ NetFree Certificate loaded")
 
-  useEffect(() => {
-    const savedUser = JSON.parse(localStorage.getItem('user') || '{}');
-    if (savedUser.id) {
-      setUser(savedUser);
-      fetchNotes(savedUser.id);
-    }
-  }, []);
+# --- 2. טעינת חוקים גנריים ---
+try:
+    from prompts import GENERIC_RULES as GENERAL_PROMPT
+except ImportError:
+    GENERAL_PROMPT = "חוקי סימולציה כלליים חסרים."
 
-  const fetchNotes = async (userId: number) => {
-    try {
-      const res = await axios.get(`${API_BASE}/${userId}/notes`);
-      setNotes(res.data);
-    } catch (err) {
-      console.error("שגיאה בטעינת פתקים:", err);
-    }
-  };
+# --- 3. ניהול מפתחות API (Gemini Tier 1) ---
+api_keys = ["AIzaSyCMCx14A7r-jHtc7XjyBArU1jdcamUyNqM"]
 
-  const handleAddNote = async () => {
-    if (!newNoteContent.trim() || !user) return;
-    try {
-      await axios.post(`${API_BASE}/${user.id}/add-note`, newNoteContent, {
-        headers: { 'Content-Type': 'text/plain' }
-      });
-      setNewNoteContent('');
-      setOpen(false);
-      fetchNotes(user.id);
-    } catch (err) {
-      console.error("שגיאה בהוספת פתק:", err);
-    }
-  };
+if not api_keys or api_keys[0] == "YOUR_NEW_KEY_HERE":
+    api_keys = [os.getenv("AI_STUDIO_API_KEY")]
 
-  const handleDeleteNote = async (id: number) => {
-    try {
-      await axios.delete(`${API_BASE}/delete-note/${id}`);
-      fetchNotes(user.id);
-    } catch (err) {
-      console.error("שגיאה במחיקת פתק:", err);
-    }
-  };
+key_cycle = itertools.cycle(api_keys)
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_KEY")
 
-  return (
-    <Box sx={{ p: 2 }}>
-      <Typography variant="h4" sx={{ mb: 4, fontWeight: 800, color: '#1e1e2d' }}>הפתקים שלי 📝</Typography>
-      <Grid container spacing={3}>
-        {notes.map((note) => (
-          <Grid item xs={12} sm={6} md={4} lg={3} key={note.id}>
-            <Paper elevation={3} sx={{ p: 3, bgcolor: NOTE_COLOR, minHeight: '150px', position: 'relative', transform: 'rotate(-1deg)' }}>
-              <IconButton 
-                size="small" 
-                onClick={() => handleDeleteNote(note.id)}
-                sx={{ position: 'absolute', top: 5, left: 5, color: 'rgba(0,0,0,0.2)' }}
-              >
-                <DeleteIcon fontSize="small" />
-              </IconButton>
-              <Typography variant="body1" sx={{ mt: 1, textAlign: 'right' }}>{note.content}</Typography>
-            </Paper>
-          </Grid>
-        ))}
-      </Grid>
-      <Fab color="primary" sx={{ position: 'fixed', bottom: 30, left: 30, bgcolor: ACCENT_PINK }} onClick={() => setOpen(true)}>
-        <AddIcon />
-      </Fab>
-      <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="xs">
-        <DialogTitle sx={{ textAlign: 'right' }}>הוספת פתק חדש</DialogTitle>
-        <DialogContent>
-          <TextField autoFocus multiline rows={4} fullWidth variant="outlined" value={newNoteContent} onChange={(e) => setNewNoteContent(e.target.value)} sx={{ mt: 1, direction: 'rtl' }} />
-        </DialogContent>
-        <DialogActions sx={{ p: 2, justifyContent: 'space-between' }}>
-          <Button onClick={() => setOpen(false)}>ביטול</Button>
-          <Button onClick={handleAddNote} variant="contained" sx={{ bgcolor: ACCENT_PINK }}>שמור</Button>
-        </DialogActions>
-      </Dialog>
-    </Box>
-  );
-};
+app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-export default AgentNotes;
+current_scenario_prompt = ""
+
+# --- 4. מודלים של נתונים ---
+class ChatRequest(BaseModel):
+    deepgram_data: dict
+    history: List[dict] = []
+    system_prompt: Optional[str] = None
+    voice_analysis_metrics: Optional[dict] = None
+
+# --- 5. פונקציות עזר לעיבוד קול ---
+async def process_deepgram_stt(audio_bytes: bytes) -> str:
+    try:
+        url = "https://api.deepgram.com/v1/listen?model=nova-3&language=he"
+        headers = {
+            "Authorization": f"Token {DEEPGRAM_API_KEY}",
+            "Content-Type": "audio/webm"
+        }
+        verify_cert = cert_path if os.path.exists(cert_path) else True
+        async with httpx.AsyncClient(verify=verify_cert) as client:
+            response = await client.post(url, headers=headers, content=audio_bytes, timeout=15.0)
+            data = response.json()
+            return data["results"]["channels"][0]["alternatives"][0]["transcript"]
+    except Exception as e:
+        print(f"❌ שגיאה בתמלול: {e}")
+        return ""
+
+async def process_tts_hebrew(text: str) -> bytes:
+    try:
+        communicate = edge_tts.Communicate(text, "he-IL-AvriNeural")
+        audio_bytes = b""
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_bytes += chunk["data"]
+        return audio_bytes
+    except Exception as e:
+        print(f"❌ שגיאה ביצירת קול: {e}")
+        return b""
+
+# --- 6. נקודת קצה לשיחה קולית (WebSocket) ---
+@app.websocket("/ws/voice/{assignment_id}")
+async def websocket_endpoint(websocket: WebSocket, assignment_id: str):
+    # הסרנו את ה-accept הכפול שגרם לקריסה
+    print(f"🚀 חיבור קולי נפתח עבור משימה מספר: {assignment_id}")
+    await websocket.accept()
+    
+    global current_scenario_prompt
+    session_history = []
+
+    try:
+        while True:
+            message = await websocket.receive()
+
+            if "bytes" in message:
+                audio_bytes = message["bytes"]
+
+                user_text = await process_deepgram_stt(audio_bytes)
+                if not user_text or len(user_text.strip()) < 2:
+                    continue
+                print(f"🗣️ נציג: {user_text}")
+
+                await websocket.send_text(json.dumps({"user_text": user_text}))
+                
+                active_prompt = current_scenario_prompt or GENERAL_PROMPT
+                client = genai.Client(api_key=next(key_cycle))
+
+                gemini_history = []
+                for msg in session_history:
+                    role = "user" if msg["role"] == "user" else "model"
+                    gemini_history.append({"role": role, "parts": [{"text": msg["content"]}]})
+
+                full_response = ""
+                sentence_buffer = ""
+
+                # שינינו ל-gemini-2.0-flash כדי לוודא תאימות (2.5 לא קיים רשמית)
+                stream = client.models.generate_content_stream(
+                    model="gemini-2.0-flash",
+                    config={
+                        "system_instruction": active_prompt,
+                        "temperature": 0.7
+                    },
+                    contents=gemini_history + [{"role": "user", "parts": [{"text": user_text}]}]
+                )
+
+                print("🤖 לקוח (Gemini) מתחיל לייצר תשובה...")
+
+                for chunk in stream:
+                    chunk_text = chunk.text
+                    full_response += chunk_text
+                    sentence_buffer += chunk_text
+
+                    if any(punc in chunk_text for punc in [".", "?", "!", "\n"]):
+                        clean_sentence = sentence_buffer.strip()
+                        if clean_sentence and len(clean_sentence) > 2:
+                            if "JSON:" not in clean_sentence and "{" not in clean_sentence:
+                                tts_text = clean_sentence.replace("[END_CALL]", "")
+                                if tts_text.strip():
+                                    audio_chunk = await process_tts_hebrew(tts_text)
+                                    if audio_chunk:
+                                        await websocket.send_bytes(audio_chunk)
+                            
+                            await websocket.send_text(json.dumps({"text": clean_sentence.replace("[END_CALL]", "")}))
+                            sentence_buffer = ""
+
+                # שליחת שארית הטקסט אם קיימת
+                if sentence_buffer.strip():
+                    await websocket.send_text(json.dumps({"text": sentence_buffer.strip().replace("[END_CALL]", "")}))
+
+                await websocket.send_text(json.dumps({"status": "end_of_turn"}))
+
+                session_history.append({"role": "user", "content": user_text})
+                session_history.append({"role": "assistant", "content": full_response})
+
+                print(f"✅ סיום סבב שיחה.")
+
+    except WebSocketDisconnect:
+        print(f"❌ החיבור למשימה {assignment_id} נסגר")
+    except Exception as e:
+        print(f"⚠️ שגיאה ב-WebSocket: {str(e)}")
+
+# --- 8. נקודת קצה לאתחול ---
+@app.post("/initialize-simulation")
+async def initialize_simulation(request: Request):
+    global current_scenario_prompt
+    try:
+        local_data = await request.json()
+        print(f"📦 קיבלתי נתונים מהריאקט עבור: {local_data.get('customerName', 'לא ידוע')}")
+
+        c_name = local_data.get("customerName", "הלקוח")
+        c_reason = local_data.get("reason", "סיבת הפנייה לא הוגדרה")
+        c_mood = local_data.get("initialMood", "ניטרלי")
+
+        meta_prompt = f"""
+        # הוראה קריטית למודל ה-AI:
+        אתה שחקן בסימולציה מקצועית. שמך הוא {c_name}.
+        תפקידך הבלעדי: לקוח שפנה לשירות בגלל: "{c_reason}".
+        מצבך הרגשי ההתחלתי: {c_mood}.
+        # חוקי הברזל של הדמות:
+        1. איסור היפוך תפקידים: אתה לעולם לא הנציג. 
+        2. תגובה למדדי קול: בסוגריים מרובעים תקבל נתוני קול.
+        3. בלי "דיבור בוט": אל תגיד "אני לא יכול להמשיך". 
+        4. סיום שיחה: כאשר הבעיה נפתרה או שהשיחה הגיעה לסיומה הטבעי, חובה עליך להוסיף בסוף התגובה שלך את המילה: [END_CALL]
+        {GENERAL_PROMPT}
+        {json.dumps(local_data, ensure_ascii=False, indent=2)}
+        החזר אך ורק את מסמך ההנחיות הסופי (System Prompt).
+        """
+
+        client = genai.Client(api_key=next(key_cycle))
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=meta_prompt,
+            config={"temperature": 0.3}
+        )
+
+        current_scenario_prompt = response.text.strip()
+        print(f"🎯 תסריט ה-System Prompt נבנה בהצלחה!")
+
+        if JAVA_SERVER_URL:
+            payload_to_java = {
+                "name": c_name,
+                "systemPrompt": current_scenario_prompt,
+                "difficulty": local_data.get("difficulty", "Medium"),
+                "category": local_data.get("category", "General"),
+                "rawData": json.dumps(local_data, ensure_ascii=False)
+            }
+            if "id" in local_data:
+                payload_to_java["id"] = local_data["id"]
+
+            try:
+                requests.post(f"{JAVA_SERVER_URL}/api/manager/add-scenario", json=payload_to_java, timeout=5)
+                print("💾 התרחיש נשמר ב-Java!")
+            except Exception as j_err:
+                print(f"⚠️ שגיאה בשמירה ל-Java: {j_err}")
+
+        return {"status": "success", "final_prompt": current_scenario_prompt}
+
+    except Exception as e:
+        print(f"❌ שגיאה קריטית באתחול פייתון: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- 9. נקודת קצה לצ'אט ---
+@app.post("/chat")
+async def chat_with_agent(request: ChatRequest):
+    global current_scenario_prompt
+    try:
+        agent_text = request.deepgram_data["results"]["channels"][0]["alternatives"][0]["transcript"]
+        active_prompt = request.system_prompt or current_scenario_prompt or GENERAL_PROMPT
+        chat_history = []
+        for msg in request.history:
+            role = "user" if msg["role"] == "user" else "model"
+            chat_history.append({"role": role, "parts": [{"text": msg["content"]}]})
+
+        client = genai.Client(api_key=next(key_cycle))
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            config={"system_instruction": active_prompt, "temperature": 0.7},
+            contents=chat_history + [{"role": "user", "parts": [{"text": agent_text}]}]
+        )
+        return {"reply": response.text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001
