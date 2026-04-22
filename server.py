@@ -507,11 +507,6 @@ load_dotenv()
 
 # --- 1. הגדרות תשתית ונטפרי (לא יפריע ב-Render) ---
 JAVA_SERVER_URL = os.getenv("JAVA_SERVER_URL", "").rstrip('/')
-cert_path = r'C:\ProgramData\NetFree\CA\netfree-ca-bundle-curl.crt'
-if os.path.exists(cert_path):
-    os.environ['SSL_CERT_FILE'] = cert_path
-    os.environ['REQUESTS_CA_BUNDLE'] = cert_path
-    print("✅ NetFree Certificate loaded")
 
 # --- 2. טעינת חוקים גנריים ---
 try:
@@ -576,18 +571,19 @@ async def process_tts_hebrew(text: str) -> bytes:
 # --- נקודת קצה לשיחה קולית (WebSocket) ---
 @app.websocket("/ws/voice/{assignment_id}")
 async def websocket_endpoint(websocket: WebSocket, assignment_id: str):
-    print(f"🚀 חיבור קולי נפתח עבור משימה: {assignment_id}")
     await websocket.accept()
-    
-    global current_scenario_prompt
-    session_history = []
+    print(f"🚀 WebSocket Connected for ID: {assignment_id}") # זה חייב להופיע בלוג!
 
     try:
         while True:
             message = await websocket.receive()
             if "bytes" in message:
+                print(f"🎤 Received {len(message['bytes'])} bytes of audio") # הדפסה חדשה
                 audio_bytes = message["bytes"]
+                
+                print("⏳ Sending to Deepgram...")
                 user_text = await process_deepgram_stt(audio_bytes)
+                print(f"📝 Deepgram result: {user_text}")
                 
                 if not user_text or len(user_text.strip()) < 2:
                     continue
