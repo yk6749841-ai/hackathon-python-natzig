@@ -277,6 +277,8 @@ app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 current_scenario_prompt = ""
+port = int(os.environ.get("PORT", 8001))
+
 
 # --- 4. מודלים של נתונים ---
 class ChatRequest(BaseModel):
@@ -479,4 +481,5 @@ async def chat_with_agent(request: ChatRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    # הרצת השרת בצורה תקינה
+    uvicorn.run(app, host="0.0.0.0", port=port)
